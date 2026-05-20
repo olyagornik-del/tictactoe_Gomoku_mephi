@@ -1,8 +1,9 @@
-"""Юнит-тесты класса :class:`agents.perceptron.Perceptron`.
+"""Юнит-тесты класса :class:`agents.perceptron.Perceptron` и интеграции
+с Гомоку (``board_to_features``, ``PerceptronAgent``, save/load).
 
-Покрывают численную устойчивость, инициализацию, инвариант ``b ≡ 0``,
-форму истории обучения и качество на линейно разделимой синтетике
-``sklearn.make_classification``.
+Тесты на синтетике (``make_classification``, два чётких блоба) —
+страховка от регрессий в SGD/BCE/sigmoid, независимая от долгого
+обучения на партиях.
 """
 
 from __future__ import annotations
