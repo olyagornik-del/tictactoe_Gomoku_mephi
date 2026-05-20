@@ -1,3 +1,5 @@
 pygame
 numpy
 pytest
+matplotlib
+scikit-learn

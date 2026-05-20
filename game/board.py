@@ -5,10 +5,9 @@
 """
 
 from __future__ import annotations
-
 from typing import Iterator
 
-# Типы и константы --------------------------------------------------------
+# Типы и константы 
 
 Symbol = str  # 'X' или 'O'
 Coord = tuple[int, int]
@@ -16,11 +15,11 @@ Coord = tuple[int, int]
 X: Symbol = "X"
 O: Symbol = "O"
 
-#: Радиус (в метрике Чебышёва) вокруг сыгранных клеток, в котором
-#: рассматриваются ходы-кандидаты. Ограничивает ветвление для Minimax/AB.
+# Радиус (в метрике Чебышёва) вокруг сыгранных клеток, в котором
+# рассматриваются ходы-кандидаты. Ограничивает ветвление для Minimax/AB.
 SEARCH_RADIUS: int = 2
 
-#: Ход по умолчанию на пустой доске.
+# Ход по умолчанию на пустой доске.
 FIRST_MOVE: Coord = (0, 0)
 
 
@@ -42,7 +41,7 @@ class Board:
         self.cells: dict[Coord, Symbol] = {}
         self.history: list[Coord] = []
 
-    # --- доступ к клеткам ------------------------------------------------
+    #   доступ к клеткам                 
 
     def get(self, x: int, y: int) -> Symbol | None:
         """Вернуть символ в клетке ``(x, y)`` или ``None``, если пусто."""
@@ -62,7 +61,7 @@ class Board:
     def __iter__(self) -> Iterator[tuple[Coord, Symbol]]:
         return iter(self.cells.items())
 
-    # --- ходы ------------------------------------------------------------
+    #   ходы                     
 
     def place(self, x: int, y: int, symbol: Symbol) -> None:
         """Поставить ``symbol`` в клетку ``(x, y)``.
@@ -88,7 +87,7 @@ class Board:
         """Координата последнего сделанного хода (или ``None``)."""
         return self.history[-1] if self.history else None
 
-    # --- генерация ходов и геометрия ------------------------------------
+    #   генерация ходов и геометрия             
 
     def search_window(self, radius: int = SEARCH_RADIUS) -> list[Coord]:
         """Список пустых клеток-кандидатов для следующего хода.
@@ -140,7 +139,7 @@ class Board:
         ys = [y for (_, y) in self.cells]
         return (min(xs), min(ys), max(xs), max(ys))
 
-    # --- копирование -----------------------------------------------------
+    #   копирование
 
     def copy(self) -> "Board":
         """Поверхностная копия доски, независимая по клеткам и истории.
