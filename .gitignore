@@ -1,0 +1,24 @@
+# Виртуальное окружение
+venv/
+.venv/
+
+# Скомпилированные веса перцептрона
+models/*.npz
+
+# Референсные репозитории
+references/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+.claude/
