@@ -340,7 +340,7 @@ class PerceptronAgent(Agent):
                 "Это займёт время; для быстрого fallback см. флаг --games "
                 "в training/train_perceptron.py."
             )
-            perceptron = train(out_path=path)
+            perceptron = train(out_path=path).model
         return cls(symbol, perceptron, feature_fn)
 
     def choose_move(self, board: Board) -> Coord:
