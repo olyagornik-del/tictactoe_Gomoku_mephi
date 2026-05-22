@@ -2,3 +2,4 @@ pygame
 numpy
 pytest
 scikit-learn
+matplotlib

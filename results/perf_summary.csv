@@ -1,0 +1,15 @@
+position_id,algorithm,param_name,param_value,median_time_sec,median_metric
+pos1_opening,alphabeta,depth,1,0.00014,24.0
+pos1_opening,alphabeta,depth,2,0.00127,169.0
+pos1_opening,alphabeta,depth,3,0.0296,3486.0
+pos1_opening,mcts,simulations,200,0.75352,200.0
+pos1_opening,minimax,depth,1,0.00015,24.0
+pos1_opening,minimax,depth,2,0.00551,840.0
+pos1_opening,perceptron,none,0,0.00105,24.0
+pos3_tactical,alphabeta,depth,1,0.00061,60.0
+pos3_tactical,alphabeta,depth,2,0.02022,1740.0
+pos3_tactical,alphabeta,depth,3,0.25466,19106.0
+pos3_tactical,mcts,simulations,200,0.68082,200.0
+pos3_tactical,minimax,depth,1,0.00066,60.0
+pos3_tactical,minimax,depth,2,0.04558,4062.0
+pos3_tactical,perceptron,none,0,0.00185,60.0

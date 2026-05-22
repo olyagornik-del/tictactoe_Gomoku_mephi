@@ -1,0 +1,15 @@
+position_id,algorithm,param_name,param_value,run,time_sec,metric_value
+pos1_opening,minimax,depth,1,1,0.00014675000420538709,24.0
+pos1_opening,minimax,depth,2,1,0.005513208998308983,840.0
+pos1_opening,alphabeta,depth,1,1,0.00013566700363298878,24.0
+pos1_opening,alphabeta,depth,2,1,0.0012692919990513474,169.0
+pos1_opening,alphabeta,depth,3,1,0.029598499997518957,3486.0
+pos1_opening,mcts,simulations,200,1,0.7535241250006948,200.0
+pos1_opening,perceptron,none,0,1,0.0010452920032548718,24.0
+pos3_tactical,minimax,depth,1,1,0.0006602919966098852,60.0
+pos3_tactical,minimax,depth,2,1,0.045578249999380205,4062.0
+pos3_tactical,alphabeta,depth,1,1,0.0006133339993539266,60.0
+pos3_tactical,alphabeta,depth,2,1,0.02021733299625339,1740.0
+pos3_tactical,alphabeta,depth,3,1,0.2546617080006399,19106.0
+pos3_tactical,mcts,simulations,200,1,0.6808178330029477,200.0
+pos3_tactical,perceptron,none,0,1,0.0018531250025262125,60.0
