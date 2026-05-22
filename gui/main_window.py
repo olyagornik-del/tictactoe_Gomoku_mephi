@@ -88,6 +88,8 @@ class GameWindow:
         if self._perceptron_model is None:
             self.sidebar.radio.disabled_keys.add("perceptron")
 
+        self._update_legend()
+
         # Текущий ИИ-агент (создаётся по требованию).
         self._ai_cache: dict[tuple[str, str], Agent] = {}
 
@@ -148,9 +150,16 @@ class GameWindow:
     def _on_toggle_ai_vs_ai(self) -> None:
         self.ai_vs_ai = not self.ai_vs_ai
         self.sidebar.set_ai_vs_ai_label(self.ai_vs_ai)
+        self._update_legend()
         # Если включили посреди партии — сбросим её, чтобы оба играли с нуля.
         if self.ai_vs_ai:
             self._on_new_game()
+
+    def _update_legend(self) -> None:
+        if self.ai_vs_ai:
+            self.board_view.legend = [(X, "ИИ"), (O, "ИИ")]
+        else:
+            self.board_view.legend = [(X, "вы"), (O, "ИИ")]
 
     def _on_reset_stats(self) -> None:
         self.session_stats.reset()
@@ -186,7 +195,12 @@ class GameWindow:
         self.board.place(*move, self.current_player)
         if is_terminal(self.board):
             win = winner(self.board)
-            self.board_view.banner = f"Победили: {win}!" if win else "Ничья"
+            if win == X:
+                self.board_view.banner = "Победили крестики (X)!"
+            elif win == O:
+                self.board_view.banner = "Победили нолики (O)!"
+            else:
+                self.board_view.banner = "Ничья"
             self.game_over = True
         else:
             self.current_player = O if self.current_player == X else X

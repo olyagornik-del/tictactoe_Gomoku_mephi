@@ -14,20 +14,22 @@ import pygame
 
 from game.board import Board, Coord, O, X
 
-# Цвета — традиционная гомоку-доска.
-COLOR_BG = (240, 207, 150)        # дерево
-COLOR_GRID = (50, 35, 20)         # тёмные линии
-COLOR_GRID_ORIGIN = (200, 60, 60) # подсветка осей через (0,0)
-COLOR_LAST_MOVE = (220, 60, 60)   # обводка последнего хода
-COLOR_X = (15, 15, 15)            # чёрный камень
-COLOR_O = (245, 245, 245)         # белый камень
-COLOR_O_BORDER = (15, 15, 15)
+# Цвета — крестики-нолики на разлинованном поле.
+COLOR_BG = (252, 250, 242)        # светлый фон поля
+COLOR_GRID = (180, 180, 180)      # линии сетки
+COLOR_GRID_ORIGIN = (228, 236, 248)  # бледная подсветка клетки (0,0)
+COLOR_LAST_MOVE = (90, 170, 90)   # обводка последнего хода (зелёная)
+COLOR_X = (40, 90, 200)           # синий крестик
+COLOR_O = (210, 60, 60)           # красный нолик
 COLOR_THINKING_BG = (255, 255, 240)
 COLOR_THINKING_FG = (60, 60, 60)
-COLOR_BANNER_WIN_X = (40, 40, 40)
-COLOR_BANNER_WIN_O = (220, 220, 220)
+COLOR_BANNER_WIN_X = (40, 90, 200)
+COLOR_BANNER_WIN_O = (210, 60, 60)
 COLOR_BANNER_FG = (255, 255, 255)
-COLOR_BANNER_FG_O = (15, 15, 15)
+COLOR_BANNER_FG_O = (255, 255, 255)
+COLOR_LEGEND_BG = (255, 255, 255)
+COLOR_LEGEND_FG = (50, 50, 50)
+COLOR_LEGEND_BORDER = (210, 210, 210)
 
 MIN_CELL = 14
 MAX_CELL = 70
@@ -51,6 +53,8 @@ class BoardView:
         self._pan_last: tuple[int, int] = (0, 0)
         self.thinking: bool = False
         self.banner: str | None = None  # текст победы / ничьей
+        #: Легенда «кто чем играет»: список (символ, подпись).
+        self.legend: list[tuple[str, str]] = [(X, "крестики"), (O, "нолики")]
 
     # --- камера ---------------------------------------------------------
 
@@ -144,10 +148,35 @@ class BoardView:
         self._draw_stones(surface)
         self._draw_last_move(surface)
         surface.set_clip(None)
+        self._draw_legend(surface, font_banner)
         if self.thinking:
             self._draw_thinking(surface, font_thinking)
         if self.banner:
             self._draw_banner(surface, font_banner)
+
+    def _draw_legend(
+        self, surface: pygame.Surface, font: pygame.font.Font
+    ) -> None:
+        """Плашка «кто чем играет» в левом верхнем углу доски."""
+        if not self.legend:
+            return
+        # font тут крупный (banner); для подписей используем мельче.
+        small = pygame.font.SysFont("arial", 15)
+        line_h = 24
+        pad = 10
+        box_w = 168
+        box_h = pad * 2 + line_h * len(self.legend)
+        box = pygame.Rect(self.rect.left + 12, self.rect.top + 12, box_w, box_h)
+        pygame.draw.rect(surface, COLOR_LEGEND_BG, box, border_radius=8)
+        pygame.draw.rect(
+            surface, COLOR_LEGEND_BORDER, box, width=1, border_radius=8
+        )
+        for i, (sym, label) in enumerate(self.legend):
+            cy = box.top + pad + line_h * i + line_h // 2
+            mark_cx = box.left + pad + 12
+            self._draw_mark(surface, sym, mark_cx, cy, 26)
+            text = small.render(f"{sym} — {label}", True, COLOR_LEGEND_FG)
+            surface.blit(text, (mark_cx + 22, cy - text.get_height() // 2))
 
     def _draw_grid(self, surface: pygame.Surface) -> None:
         # Сколько клеток помещается в полу-ширину/высоту.
@@ -157,35 +186,57 @@ class BoardView:
         x_max = int(self.cx + half_w) + 1
         y_min = int(self.cy - half_h) - 1
         y_max = int(self.cy + half_h) + 1
+
+        # Подсветка клетки (0,0), чтобы было видно начало координат.
+        ox, oy = self.world_to_screen(0, 0)
+        half = self.cell_size / 2
+        origin_rect = pygame.Rect(
+            int(ox - half), int(oy - half),
+            int(self.cell_size), int(self.cell_size),
+        )
+        if self.rect.colliderect(origin_rect):
+            pygame.draw.rect(surface, COLOR_GRID_ORIGIN, origin_rect)
+
+        # Линии — на ГРАНИЦАХ клеток (полуцелые мировые координаты),
+        # чтобы фигуры (в целых координатах) попадали внутрь клеток.
         for x in range(x_min, x_max + 1):
-            sx, _ = self.world_to_screen(x, 0)
-            color = COLOR_GRID_ORIGIN if x == 0 else COLOR_GRID
-            width = 2 if x == 0 else 1
+            sx, _ = self.world_to_screen(x - 0.5, 0)
             pygame.draw.line(
-                surface, color, (sx, self.rect.top), (sx, self.rect.bottom), width
+                surface, COLOR_GRID, (sx, self.rect.top), (sx, self.rect.bottom), 1
             )
         for y in range(y_min, y_max + 1):
-            _, sy = self.world_to_screen(0, y)
-            color = COLOR_GRID_ORIGIN if y == 0 else COLOR_GRID
-            width = 2 if y == 0 else 1
+            _, sy = self.world_to_screen(0, y - 0.5)
             pygame.draw.line(
-                surface, color, (self.rect.left, sy), (self.rect.right, sy), width
+                surface, COLOR_GRID, (self.rect.left, sy), (self.rect.right, sy), 1
             )
 
     def _draw_stones(self, surface: pygame.Surface) -> None:
-        radius = self.cell_size * 0.42
-        border = max(2, int(self.cell_size * 0.06))
         for (wx, wy), sym in self.board.cells.items():
             sx, sy = self.world_to_screen(wx, wy)
             if not self.rect.collidepoint(sx, sy):
                 continue
-            if sym == X:
-                pygame.draw.circle(surface, COLOR_X, (int(sx), int(sy)), int(radius))
-            elif sym == O:
-                pygame.draw.circle(surface, COLOR_O, (int(sx), int(sy)), int(radius))
-                pygame.draw.circle(
-                    surface, COLOR_O_BORDER, (int(sx), int(sy)), int(radius), border
-                )
+            self._draw_mark(surface, sym, sx, sy, self.cell_size)
+
+    @staticmethod
+    def _draw_mark(
+        surface: pygame.Surface, sym: str, sx: float, sy: float, cell: float
+    ) -> None:
+        """Нарисовать ✕ или ◯ в точке ``(sx, sy)`` под размер клетки ``cell``."""
+        half = cell * 0.30
+        line_w = max(2, int(cell * 0.11))
+        if sym == X:
+            pygame.draw.line(
+                surface, COLOR_X,
+                (sx - half, sy - half), (sx + half, sy + half), line_w,
+            )
+            pygame.draw.line(
+                surface, COLOR_X,
+                (sx - half, sy + half), (sx + half, sy - half), line_w,
+            )
+        elif sym == O:
+            pygame.draw.circle(
+                surface, COLOR_O, (int(sx), int(sy)), int(cell * 0.33), line_w,
+            )
 
     def _draw_last_move(self, surface: pygame.Surface) -> None:
         last = self.board.last_move
