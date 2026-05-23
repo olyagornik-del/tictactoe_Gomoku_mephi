@@ -14,10 +14,12 @@ from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
 from agents.perceptron import (
+    ENGINEERED_DIM,
     FEATURE_DIM,
     Perceptron,
     PerceptronAgent,
     board_to_features,
+    move_features,
 )
 from game.board import O, X, Board
 
@@ -265,10 +267,11 @@ def test_save_load_weights_roundtrip(tmp_path) -> None:
 
 def _untrained_agent(symbol):
     """Маленький детерминированный агент без обучения — для юнит-тестов
-    логики выбора хода (а не качества игры)."""
-    p = Perceptron(n_features=FEATURE_DIM, init_method="small_random",
+    логики выбора хода (а не качества игры). Предохранитель выключен,
+    чтобы тест считал именно прогоны сети."""
+    p = Perceptron(n_features=ENGINEERED_DIM, init_method="small_random",
                    random_state=0)
-    return PerceptronAgent(symbol, p, board_to_features)
+    return PerceptronAgent(symbol, p, move_features, tactical=False)
 
 
 def test_perceptron_agent_returns_legal_move_on_empty_board() -> None:
@@ -341,3 +344,36 @@ def test_perceptron_beats_random_after_training(tmp_path) -> None:
         games += 1
     winrate = wins / games
     assert winrate > 0.60, f"перцептрон winrate={winrate:.0%} ниже 60%"
+
+
+# --- инженерные признаки (move_features) -------------------------------
+
+
+def test_move_features_shape_and_dim() -> None:
+    b = Board()
+    b.place(0, 0, X)
+    v = move_features(b, (1, 0), X)
+    assert v.shape == (ENGINEERED_DIM,)  # 12
+    assert v.dtype == np.float64
+
+
+def test_move_features_detects_own_attack() -> None:
+    """Ход, создающий открытую тройку, должен это отразить в «своих»
+    признаках (первые 6)."""
+    b = Board()
+    b.place(0, 0, X)
+    b.place(1, 0, X)          # X X _ , ход X в (2,0) даёт открытую тройку
+    own = move_features(b, (2, 0), X)[:6]
+    # индекс 2 = открытая тройка
+    assert own[2] == 1
+
+
+def test_move_features_detects_opponent_threat_to_block() -> None:
+    """Ход на клетку, где соперник сделал бы четвёрку, отражается в
+    «чужих» признаках (последние 6) — это сигнал к блоку."""
+    b = Board()
+    for i in range(3):
+        b.place(i, 0, O)      # O O O _ ; (3,0) дало бы O четвёрку
+    opp = move_features(b, (3, 0), X)[6:]
+    # индекс 4 (в своей половине) = четвёрка; в «чужой» половине это [4]
+    assert opp[4] == 1

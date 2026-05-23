@@ -19,8 +19,8 @@ import numpy as np
 
 from agents.alphabeta import AlphaBetaAgent
 from agents.heuristic import evaluate
-from agents.perceptron import FEATURE_DIM, board_to_features
-from game.board import O, X, Board
+from agents.perceptron import FEATURE_DIM, FeatureFn, board_to_features
+from game.board import O, X, Board, Symbol
 from game.rules import winner
 
 
@@ -81,6 +81,71 @@ def generate_dataset(
     X_arr = (
         np.stack(xs).astype(np.float64)
         if xs else np.zeros((0, FEATURE_DIM), np.float64)
+    )
+    y_arr = np.asarray(ys, dtype=np.float64)
+    return X_arr, y_arr
+
+
+def generate_imitation_dataset(
+    num_games: int,
+    feature_fn: FeatureFn,
+    n_features: int,
+    neg_per_pos: int = 4,
+    epsilon: float = 0.1,
+    depth: int = 2,
+    max_moves: int = 60,
+    seed: int | None = None,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Имитационный датасет: «какой ход выбрал бы Alpha-Beta».
+
+    На каждой позиции AB-vs-AB-партии:
+
+    * ход, выбранный Alpha-Beta → положительный пример (метка 1);
+    * ``neg_per_pos`` случайных других ходов из окна → отрицательные (0).
+
+    Признаки считаются ``feature_fn(board, move, player)`` без фактической
+    постановки камня. Партия продвигается с ε-шумом (для разнообразия
+    позиций), но метку всегда даёт лучший ход AB.
+
+    :return: ``(X, y)`` формы ``(N, n_features)`` и ``(N,)`` ∈ {0, 1}.
+    """
+    rng = random.Random(seed)
+    ab_x = AlphaBetaAgent(X, depth=depth)
+    ab_o = AlphaBetaAgent(O, depth=depth)
+
+    xs: list[np.ndarray] = []
+    ys: list[int] = []
+
+    for game_idx in range(num_games):
+        board = Board()
+        turn: Symbol = X
+        agent = ab_x
+        for _ in range(max_moves):
+            window = board.search_window()
+            best = agent.choose_move(board)
+            # положительный пример — ход AB
+            xs.append(feature_fn(board, best, turn))
+            ys.append(1)
+            # отрицательные — случайные другие ходы
+            others = [m for m in window if m != best]
+            rng.shuffle(others)
+            for m in others[:neg_per_pos]:
+                xs.append(feature_fn(board, m, turn))
+                ys.append(0)
+            # продвигаем партию (с ε-шумом)
+            played = rng.choice(window) if rng.random() < epsilon else best
+            board.place(*played, turn)
+            if winner(board) is not None:
+                break
+            turn = O if turn == X else X
+            agent = ab_o if turn == O else ab_x
+        if verbose and (game_idx + 1) % max(1, num_games // 10) == 0:
+            print(f"  партий: {game_idx + 1}/{num_games}, сэмплов: {len(xs)}")
+
+    X_arr = (
+        np.stack(xs).astype(np.float64)
+        if xs else np.zeros((0, n_features), np.float64)
     )
     y_arr = np.asarray(ys, dtype=np.float64)
     return X_arr, y_arr

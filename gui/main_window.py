@@ -18,9 +18,11 @@ from agents.mcts import MCTSAgent
 from agents.minimax import MinimaxAgent
 from agents.perceptron import (
     DEFAULT_MODEL_PATH,
+    ENGINEERED_DIM,
     Perceptron,
     PerceptronAgent,
-    board_to_features,
+    move_features,
+    pixel_features,
 )
 from game.board import O, X, Board
 from game.rules import is_terminal, winner
@@ -126,7 +128,15 @@ class GameWindow:
             )
         elif algo == "perceptron":
             assert self._perceptron_model is not None
-            agent = PerceptronAgent(symbol, self._perceptron_model, board_to_features)
+            # Признаки и предохранитель — по типу загруженной модели:
+            # инженерная (12 весов) защищается сама → guard off;
+            # пиксельная (243) — нет → guard on.
+            engineered = self._perceptron_model.n_features == ENGINEERED_DIM
+            feature_fn = move_features if engineered else pixel_features
+            agent = PerceptronAgent(
+                symbol, self._perceptron_model, feature_fn,
+                tactical=not engineered,
+            )
         else:  # pragma: no cover
             raise ValueError(f"unknown algorithm: {algo}")
         self._ai_cache[key] = agent

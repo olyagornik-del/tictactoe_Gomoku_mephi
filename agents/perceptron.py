@@ -37,16 +37,21 @@ from typing import Callable, Literal
 import numpy as np
 
 from agents.base import Agent
-from game.board import Board, Coord, Symbol
+from game.board import Board, Coord, Symbol, opponent
+from game.rules import DIRECTIONS, is_win_at
 
 InitMethod = Literal["zeros", "small_random", "large_random"]
 
 #: Радиус окна вокруг хода (9×9 → радиус 4 в каждую сторону).
 WINDOW_RADIUS: int = 4
-#: Размер вектора признаков: 9 × 9 × 3 = 243.
+#: Размер «пиксельного» вектора признаков: 9 × 9 × 3 = 243.
 FEATURE_DIM: int = (2 * WINDOW_RADIUS + 1) ** 2 * 3
-#: Путь к весам по умолчанию для PerceptronAgent.
+#: Размер «инженерного» вектора признаков (6 паттернов × {свой, чужой}).
+ENGINEERED_DIM: int = 12
+#: Путь к весам по умолчанию для PerceptronAgent (инженерная модель).
 DEFAULT_MODEL_PATH: str = os.path.join("models", "perceptron.npz")
+#: Путь к старой «пиксельной» модели (для сравнения в экспериментах).
+PIXEL_MODEL_PATH: str = os.path.join("models", "perceptron_pixel.npz")
 
 
 class Perceptron:
@@ -284,8 +289,107 @@ def board_to_features(state: Board, move: Coord) -> np.ndarray:
     return feats
 
 
-#: Тип функции извлечения признаков.
-FeatureFn = Callable[[Board, Coord], np.ndarray]
+# ----- инженерные признаки (Путь 1) -------------------------------------
+#
+# Вместо 243 «сырых пикселей» — 12 осмысленных чисел про ход-кандидат:
+# по 6 счётчиков паттернов для своих камней (атака) и для камней
+# соперника (защита). Линейная модель может тогда сама выучить, что
+# «создать открытую тройку» и «заблокировать четвёрку соперника» — оба
+# полезны.
+
+
+def _line_patterns(
+    board: Board, x: int, y: int, sym: Symbol
+) -> list[tuple[int, int]]:
+    """Для 4 направлений: ``(длина, число_открытых_концов)`` линии ``sym``
+    через ``(x, y)``, как если бы ``sym`` поставил туда камень."""
+    cells = board.cells
+    out: list[tuple[int, int]] = []
+    for dx, dy in DIRECTIONS:
+        length = 1
+        cx, cy = x + dx, y + dy
+        while cells.get((cx, cy)) == sym:
+            length += 1
+            cx += dx
+            cy += dy
+        end_a_open = cells.get((cx, cy)) is None
+        cx, cy = x - dx, y - dy
+        while cells.get((cx, cy)) == sym:
+            length += 1
+            cx -= dx
+            cy -= dy
+        end_b_open = cells.get((cx, cy)) is None
+        out.append((length, int(end_a_open) + int(end_b_open)))
+    return out
+
+
+def _pattern_counts(board: Board, x: int, y: int, sym: Symbol) -> list[int]:
+    """6 счётчиков паттернов для хода ``sym`` в ``(x, y)``.
+
+    Индексы: ``[откр.2, закр.2, откр.3, закр.3, четвёрка, пятёрка]``.
+    Мёртвые линии (0 свободных концов, длина < 5) не считаются.
+    """
+    counts = [0, 0, 0, 0, 0, 0]
+    for length, open_ends in _line_patterns(board, x, y, sym):
+        if length >= 5:
+            counts[5] += 1
+        elif length == 4 and open_ends >= 1:
+            counts[4] += 1
+        elif length == 3 and open_ends == 2:
+            counts[2] += 1
+        elif length == 3 and open_ends == 1:
+            counts[3] += 1
+        elif length == 2 and open_ends == 2:
+            counts[0] += 1
+        elif length == 2 and open_ends == 1:
+            counts[1] += 1
+    return counts
+
+
+def move_features(board: Board, move: Coord, player: Symbol) -> np.ndarray:
+    """12 инженерных признаков хода ``move`` для игрока ``player``.
+
+    Первые 6 — паттерны, которые ``player`` создаёт этим ходом (атака);
+    последние 6 — паттерны соперника, которые этот ход перекрывает
+    (защита). Камень фактически не ставится — всё считается «в уме».
+    """
+    own = _pattern_counts(board, move[0], move[1], player)
+    opp = _pattern_counts(board, move[0], move[1], opponent(player))
+    return np.asarray(own + opp, dtype=np.float64)
+
+
+def pixel_features(board: Board, move: Coord, player: Symbol) -> np.ndarray:
+    """Адаптер «пиксельных» признаков к контракту ``(board, move, player)``.
+
+    Временно ставит камень ``player`` в ``move`` (так как
+    :func:`board_to_features` берёт ракурс из занятой клетки) и
+    откатывает.
+    """
+    board.place(*move, player)
+    feats = board_to_features(board, move)
+    board.undo()
+    return feats
+
+
+#: Тип функции извлечения признаков: ``(доска, ход, игрок) -> вектор``.
+FeatureFn = Callable[[Board, Coord, Symbol], np.ndarray]
+
+
+def _line_if_placed(board: Board, x: int, y: int, sym: Symbol) -> int:
+    """Длина самой длинной линии ``sym`` через ``(x, y)``, если там
+    поставить камень ``sym`` (клетка считается своей)."""
+    cells = board.cells
+    best = 1
+    for dx, dy in DIRECTIONS:
+        length = 1
+        for sign in (1, -1):
+            cx, cy = x + sign * dx, y + sign * dy
+            while cells.get((cx, cy)) == sym:
+                length += 1
+                cx += sign * dx
+                cy += sign * dy
+        best = max(best, length)
+    return best
 
 
 class PerceptronAgent(Agent):
@@ -310,23 +414,29 @@ class PerceptronAgent(Agent):
         symbol: Symbol,
         perceptron: "Perceptron",
         feature_fn: FeatureFn,
+        tactical: bool = True,
     ) -> None:
         super().__init__(symbol)
         self._perceptron = perceptron
         self._feature_fn = feature_fn
+        #: Тактический предохранитель (выигрыш/блок). Выкл для замера
+        #: «чистого» перцептрона в экспериментах.
+        self.tactical = tactical
 
     @classmethod
     def from_disk(
         cls,
         symbol: Symbol,
         path: str = DEFAULT_MODEL_PATH,
-        feature_fn: FeatureFn = board_to_features,
+        feature_fn: FeatureFn | None = None,
+        tactical: bool = True,
     ) -> "PerceptronAgent":
         """Сконструировать агента, загрузив веса с диска.
 
-        Если файла ``path`` нет — запускается обучение через
-        :func:`training.train_perceptron.train` с дефолтными
-        параметрами ТЗ и веса сохраняются по этому пути.
+        Если ``feature_fn`` не задан — определяется автоматически по
+        размеру весов: 12 → инженерные признаки, иначе пиксельные.
+        Если файла ``path`` нет — запускается обучение и веса
+        сохраняются по этому пути.
         """
         if os.path.exists(path):
             perceptron = Perceptron.load_weights(path)
@@ -341,7 +451,45 @@ class PerceptronAgent(Agent):
                 "в training/train_perceptron.py."
             )
             perceptron = train(out_path=path).model
-        return cls(symbol, perceptron, feature_fn)
+        if feature_fn is None:
+            feature_fn = (
+                move_features if perceptron.n_features == ENGINEERED_DIM
+                else pixel_features
+            )
+        return cls(symbol, perceptron, feature_fn, tactical=tactical)
+
+    def _tactical_move(self, board: Board, moves: list[Coord]) -> Coord | None:
+        """Тактика поверх перцептрона: выигрыш → блок мата → блок четвёрки.
+
+        Перцептрон оценивает позицию локально «для себя» и системно не
+        видит угроз соперника. Этот предохранитель закрывает грубые дыры,
+        не подменяя позиционный выбор сети в спокойных позициях.
+        """
+        me, opp = self.symbol, opponent(self.symbol)
+
+        # 1. Победа в один ход.
+        for m in moves:
+            board.place(*m, me)
+            win = is_win_at(board, m)
+            board.undo()
+            if win:
+                return m
+        # 2. Блок немедленного выигрыша соперника.
+        for m in moves:
+            board.place(*m, opp)
+            win = is_win_at(board, m)
+            board.undo()
+            if win:
+                return m
+        # 3. Блок хода, дающего сопернику четвёрку (тройка → четвёрка).
+        best_threat: Coord | None = None
+        best_len = 3  # реагируем только на линии длиной >= 4
+        for m in moves:
+            line = _line_if_placed(board, m[0], m[1], opp)
+            if line > best_len:
+                best_len = line
+                best_threat = m
+        return best_threat
 
     def choose_move(self, board: Board) -> Coord:
         moves = board.search_window()
@@ -349,13 +497,16 @@ class PerceptronAgent(Agent):
         if len(moves) == 1:
             return moves[0]
 
+        if self.tactical:
+            forced = self._tactical_move(board, moves)
+            if forced is not None:
+                return forced
+
         best_move: Coord = moves[0]
         best_value = -np.inf
         for m in moves:
-            board.place(*m, self.symbol)
-            x = self._feature_fn(board, m)
+            x = self._feature_fn(board, m, self.symbol)
             value = float(self._perceptron.forward(x))
-            board.undo()
             self.last_nodes += 1
             if value > best_value:
                 best_value = value

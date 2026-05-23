@@ -25,14 +25,26 @@ from sklearn.model_selection import train_test_split
 
 from agents.perceptron import (
     DEFAULT_MODEL_PATH,
+    ENGINEERED_DIM,
     FEATURE_DIM,
     InitMethod,
     Perceptron,
+    move_features,
+    pixel_features,
 )
-from training.data_generator import generate_dataset
+from training.data_generator import (
+    generate_dataset,
+    generate_imitation_dataset,
+)
 
 #: Файл-журнал экспериментов по умолчанию.
 DEFAULT_LOG_PATH: str = "training_log.md"
+
+#: Режимы признаков: имя → (функция, размерность).
+FEATURE_MODES = {
+    "engineered": (move_features, ENGINEERED_DIM),
+    "pixel": (pixel_features, FEATURE_DIM),
+}
 
 
 @dataclass
@@ -58,37 +70,55 @@ def _generate_or_load(
     max_moves: int,
     seed: int | None,
     cache_path: str | None,
+    feature_mode: str,
+    label_mode: str,
+    neg_per_pos: int,
     verbose: bool,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Сгенерировать датасет AB-vs-AB или загрузить его из кэша.
 
-    Если ``cache_path`` указан и файл существует — берёт данные оттуда
-    (``gen_time = 0``). Если файла нет — генерит и сохраняет.
-    Если ``cache_path`` ``None`` — просто генерит без кэширования.
+    ``label_mode``:
+
+    * ``"imitation"`` — метка = «это ход, выбранный Alpha-Beta?»
+      (учит и атаке, и защите). Признаки — по ``feature_mode``.
+    * ``"positional"`` — старая метка «eval>0 после хода» (только
+      пиксельные признаки 9×9).
     """
+    feature_fn, n_features = FEATURE_MODES[feature_mode]
+
     if cache_path and os.path.exists(cache_path):
         if verbose:
             print(f"[train] Загружаю датасет из кэша {cache_path}")
         with np.load(cache_path) as data:
             X = data["X"]
             y = data["y"]
-        if verbose:
-            print(
-                f"[train] Сэмплов в кэше: {len(X)}. "
-                f"(параметр --games игнорируется)"
+        if X.shape[1] != n_features:
+            raise ValueError(
+                f"кэш {cache_path} имеет {X.shape[1]} признаков, а режим "
+                f"'{feature_mode}' ожидает {n_features}. Удали кэш или смени режим."
             )
+        if verbose:
+            print(f"[train] Сэмплов в кэше: {len(X)} (--games игнорируется)")
         return X, y, 0.0
 
     if verbose:
         print(
             f"[train] Генерация {num_games} партий "
-            f"(AB depth={depth}, epsilon={epsilon})…"
+            f"(AB depth={depth}, ε={epsilon}, признаки={feature_mode}, "
+            f"метки={label_mode})…"
         )
     t0 = time.time()
-    X, y = generate_dataset(
-        num_games=num_games, epsilon=epsilon, depth=depth,
-        max_moves=max_moves, seed=seed, verbose=verbose,
-    )
+    if label_mode == "imitation":
+        X, y = generate_imitation_dataset(
+            num_games=num_games, feature_fn=feature_fn, n_features=n_features,
+            neg_per_pos=neg_per_pos, epsilon=epsilon, depth=depth,
+            max_moves=max_moves, seed=seed, verbose=verbose,
+        )
+    else:  # positional — только пиксельные признаки
+        X, y = generate_dataset(
+            num_games=num_games, epsilon=epsilon, depth=depth,
+            max_moves=max_moves, seed=seed, verbose=verbose,
+        )
     gen_time = time.time() - t0
 
     if cache_path:
@@ -115,16 +145,25 @@ def train(
     seed: int | None = 42,
     out_path: str = DEFAULT_MODEL_PATH,
     cache_path: str | None = None,
+    feature_mode: str = "engineered",
+    label_mode: str = "imitation",
+    neg_per_pos: int = 4,
     verbose: bool = True,
 ) -> TrainResult:
     """Полный цикл: датасет → 80/20 split → SGD → save_weights.
 
     Возвращает :class:`TrainResult` со всеми метриками — для журнала.
     """
+    if label_mode == "positional" and feature_mode != "pixel":
+        # Позиционная метка считается только для пиксельных окон.
+        feature_mode = "pixel"
+    _, n_features = FEATURE_MODES[feature_mode]
+
     X, y, gen_time = _generate_or_load(
         num_games=num_games, epsilon=epsilon, depth=depth,
-        max_moves=max_moves, seed=seed,
-        cache_path=cache_path, verbose=verbose,
+        max_moves=max_moves, seed=seed, cache_path=cache_path,
+        feature_mode=feature_mode, label_mode=label_mode,
+        neg_per_pos=neg_per_pos, verbose=verbose,
     )
     pos = float(y.mean())
     if verbose:
@@ -142,7 +181,7 @@ def train(
     )
 
     model = Perceptron(
-        n_features=FEATURE_DIM, init_method=init_method, random_state=seed,
+        n_features=n_features, init_method=init_method, random_state=seed,
     )
     t1 = time.time()
     history = model.fit(
@@ -176,6 +215,7 @@ def train(
             "num_games": num_games, "epochs": epochs, "lr": lr,
             "batch_size": batch_size, "init_method": init_method,
             "epsilon": epsilon, "depth": depth, "seed": seed,
+            "feature_mode": feature_mode, "label_mode": label_mode,
         },
     )
 
@@ -336,6 +376,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--init", type=str, default="small_random",
                    choices=["zeros", "small_random", "large_random"],
                    dest="init_method")
+    p.add_argument("--features", type=str, default="engineered",
+                   choices=["engineered", "pixel"], dest="feature_mode",
+                   help="engineered=12 признаков паттернов, pixel=243 one-hot.")
+    p.add_argument("--labels", type=str, default="imitation",
+                   choices=["imitation", "positional"], dest="label_mode",
+                   help="imitation=ход AB; positional=eval>0 (только pixel).")
+    p.add_argument("--neg-per-pos", type=int, default=4, dest="neg_per_pos",
+                   help="Отрицательных примеров на позицию (для imitation).")
     p.add_argument("--max-moves", type=int, default=60, dest="max_moves")
     p.add_argument("--val-size", type=float, default=0.2, dest="val_size")
     p.add_argument("--seed", type=int, default=42)
@@ -364,7 +412,8 @@ def main(argv: list[str] | None = None) -> None:
         init_method=args.init_method, max_moves=args.max_moves,
         val_size=args.val_size, seed=args.seed,
         out_path=args.out_path, cache_path=args.cache_path,
-        verbose=not args.quiet,
+        feature_mode=args.feature_mode, label_mode=args.label_mode,
+        neg_per_pos=args.neg_per_pos, verbose=not args.quiet,
     )
 
     if args.eval_games > 0:
