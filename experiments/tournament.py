@@ -75,7 +75,34 @@ def _aggregate_times(moves: list[dict], first_color: str) -> tuple[float, float,
     return t_first_s, t_second_s, avg_first, avg_second
 
 
-def run() -> None:
+FIELDNAMES = [
+    "game_id", "algo_first", "algo_second", "param_first",
+    "param_second", "first_color", "winner", "num_moves",
+    "time_first_total_sec", "time_second_total_sec",
+    "avg_time_per_move_first", "avg_time_per_move_second",
+]
+
+
+def _completed_game_ids(path: str) -> set[int]:
+    """Множество уже сыгранных game_id из существующего CSV (для resume)."""
+    done: set[int] = set()
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    done.add(int(row["game_id"]))
+                except (KeyError, ValueError):
+                    pass
+    return done
+
+
+def run(resume: bool = True) -> None:
+    """Круговой турнир с инкрементальной записью и возобновлением.
+
+    Каждая партия дописывается в CSV сразу (flush), поэтому прерывание
+    процесса не теряет прогресс. При повторном запуске уже сыгранные
+    ``game_id`` пропускаются.
+    """
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     algorithms = ["minimax", "alphabeta", "mcts", "perceptron"]
@@ -87,53 +114,62 @@ def run() -> None:
               "пары с перцептроном пропускаются.")
         algorithms.remove("perceptron")
 
-    rows: list[dict] = []
-    game_id = 0
+    completed = _completed_game_ids(TOURNAMENT_CSV) if resume else set()
+    has_data = os.path.exists(TOURNAMENT_CSV) and os.path.getsize(TOURNAMENT_CSV) > 0
+    append = resume and has_data
+    if completed:
+        print(f"[tournament] возобновление: уже сыграно {len(completed)} партий")
 
-    for algo_a, algo_b in combinations(algorithms, 2):
-        for color_round in (X, O):  # первый агент (A) играет сначала X, потом O
-            for _ in range(GAMES_PER_COLOR):
-                game_id += 1
-                if color_round == X:
-                    first_color = X
-                    agent_x = _make_agent(algo_a, X, game_id, perceptron_model)
-                    agent_o = _make_agent(algo_b, O, game_id, perceptron_model)
-                else:
-                    first_color = O
-                    agent_x = _make_agent(algo_b, X, game_id, perceptron_model)
-                    agent_o = _make_agent(algo_a, O, game_id, perceptron_model)
-
-                result = play_one_game(agent_x, agent_o, max_moves=MAX_MOVES)
-                t_f, t_s, avg_f, avg_s = _aggregate_times(
-                    result["moves"], first_color
-                )
-                rows.append({
-                    "game_id": game_id,
-                    "algo_first": algo_a,
-                    "algo_second": algo_b,
-                    "param_first": PARAM_LABEL[algo_a],
-                    "param_second": PARAM_LABEL[algo_b],
-                    "first_color": first_color,
-                    "winner": result["winner"],
-                    "num_moves": result["num_moves"],
-                    "time_first_total_sec": round(t_f, 4),
-                    "time_second_total_sec": round(t_s, 4),
-                    "avg_time_per_move_first": round(avg_f, 4),
-                    "avg_time_per_move_second": round(avg_s, 4),
-                })
-        print(f"[tournament] {algo_a} vs {algo_b}: 30 партий сыграно")
-
-    with open(TOURNAMENT_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "game_id", "algo_first", "algo_second", "param_first",
-            "param_second", "first_color", "winner", "num_moves",
-            "time_first_total_sec", "time_second_total_sec",
-            "avg_time_per_move_first", "avg_time_per_move_second",
-        ])
+    f = open(TOURNAMENT_CSV, "a" if append else "w", newline="", encoding="utf-8")
+    writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+    if not append:
         writer.writeheader()
-        writer.writerows(rows)
+        f.flush()
 
-    print(f"готово: {TOURNAMENT_CSV}, {len(rows)} строк")
+    written = len(completed)
+    game_id = 0
+    try:
+        for algo_a, algo_b in combinations(algorithms, 2):
+            for color_round in (X, O):  # A играет сначала X, потом O
+                for _ in range(GAMES_PER_COLOR):
+                    game_id += 1
+                    if game_id in completed:
+                        continue
+                    if color_round == X:
+                        first_color = X
+                        agent_x = _make_agent(algo_a, X, game_id, perceptron_model)
+                        agent_o = _make_agent(algo_b, O, game_id, perceptron_model)
+                    else:
+                        first_color = O
+                        agent_x = _make_agent(algo_b, X, game_id, perceptron_model)
+                        agent_o = _make_agent(algo_a, O, game_id, perceptron_model)
+
+                    result = play_one_game(agent_x, agent_o, max_moves=MAX_MOVES)
+                    t_f, t_s, avg_f, avg_s = _aggregate_times(
+                        result["moves"], first_color
+                    )
+                    writer.writerow({
+                        "game_id": game_id,
+                        "algo_first": algo_a,
+                        "algo_second": algo_b,
+                        "param_first": PARAM_LABEL[algo_a],
+                        "param_second": PARAM_LABEL[algo_b],
+                        "first_color": first_color,
+                        "winner": result["winner"],
+                        "num_moves": result["num_moves"],
+                        "time_first_total_sec": round(t_f, 4),
+                        "time_second_total_sec": round(t_s, 4),
+                        "avg_time_per_move_first": round(avg_f, 4),
+                        "avg_time_per_move_second": round(avg_s, 4),
+                    })
+                    f.flush()  # прогресс переживает прерывание
+                    written += 1
+            print(f"[tournament] {algo_a} vs {algo_b}: пара готова "
+                  f"(всего строк: {written})")
+    finally:
+        f.close()
+
+    print(f"готово: {TOURNAMENT_CSV}, {written} строк")
 
 
 if __name__ == "__main__":

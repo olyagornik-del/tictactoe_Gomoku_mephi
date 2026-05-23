@@ -157,6 +157,51 @@ python -u -m training.train_perceptron --epochs 200 --cache-data data/g400.npz -
 
 ---
 
+## Эксперименты (батч-замеры без GUI)
+
+Директория `experiments/` — воспроизводимые замеры производительности и
+силы игры без участия человека. Результаты (CSV + PNG-графики, 150 dpi)
+складываются в `results/`.
+
+```bash
+python -m experiments.perf_benchmark   # Эксперимент A: скорость
+python -m experiments.tournament       # Эксперимент B: сила игры
+python -m experiments.analyze          # графики и сводные таблицы
+```
+
+- **Эксперимент A** (`perf_benchmark.py`) — время хода и счётчик
+  (узлы / симуляции / прогоны) на 3 фиксированных позициях для разных
+  параметров каждого алгоритма, по 5 повторов. Долгие конфиги (minimax
+  depth=4, alpha-beta depth=5–6) ограничены таймаутом 60 c и пишутся как
+  `NaN`. → `results/perf.csv`, `perf_summary.csv`.
+- **Эксперимент B** (`tournament.py`) — круговой турнир: 6 пар × 30
+  партий (15 за X, 15 за O), параметры по умолчанию (minimax/AB depth=3,
+  MCTS 1000 симуляций, перцептрон — как есть). → `results/tournament.csv`.
+- **Анализ** (`analyze.py`) — графики `perf_time_*.png`,
+  `perf_branching.png` (эффективный коэффициент ветвления),
+  `winrate_heatmap.png`, `avg_time_bar.png` и сводные таблицы в консоль.
+
+### Как отслеживать и не потерять прогресс
+
+Турнир может идти **десятки минут** (узкое место — медленный minimax
+depth=3 в первой паре). Он устроен **отказоустойчиво**: каждая партия
+сразу дописывается в `tournament.csv`, а повторный запуск **продолжает
+с места обрыва** (уже сыгранные `game_id` пропускаются).
+
+```bash
+# следить за прогрессом (цель — 181 строка = 180 партий + заголовок)
+wc -l results/tournament.csv
+
+# чтобы macOS не уснул и долгий прогон не прервался — caffeinate:
+caffeinate -is python -m experiments.tournament
+```
+
+> Не запускайте две копии одного эксперимента одновременно — оба пишут в
+> один CSV. Если прогон прервался, просто запустите ту же команду снова —
+> турнир до-играет недостающие партии.
+
+---
+
 ## Структура проекта
 
 ```
@@ -165,9 +210,11 @@ agents/      base.py + minimax / alphabeta / mcts / perceptron + heuristic
 training/    генерация данных (data_generator.py) и обучение (train_perceptron.py)
 metrics/     профайлер (profiler.py) и агрегатор статистики (stats.py)
 gui/         pygame: board_view.py (доска+камера), sidebar.py (панель), main_window.py (цикл)
+experiments/ батч-замеры: runner.py, perf_benchmark.py, tournament.py, analyze.py
 tests/       pytest: доска, правила, эвристика, агенты, MCTS, метрики, перцептрон
 models/      сохранённые веса перцептрона (.npz, в .gitignore)
 data/        кэши датасетов (.npz, в .gitignore)
+results/     CSV и PNG из experiments/
 main.py      точка входа в GUI
 ```
 

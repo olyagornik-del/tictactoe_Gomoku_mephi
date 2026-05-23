@@ -120,10 +120,18 @@ def run() -> None:
     for pos_id, moves in POSITIONS.items():
         for algorithm, param_name, values in _agent_configs():
             for param_value in values:
+                # Если конфиг детерминированно сорвался по таймауту на
+                # первом повторе — остальные повторы тоже NaN (без прогона).
+                timed_out = False
                 for run_idx in range(1, REPEATS + 1):
-                    board = _build_board(moves)
-                    agent = _make_agent(algorithm, param_value)
-                    time_sec, metric = _timed_move(agent, board, TIMEOUT_SEC)
+                    if timed_out:
+                        time_sec, metric = math.nan, math.nan
+                    else:
+                        board = _build_board(moves)
+                        agent = _make_agent(algorithm, param_value)
+                        time_sec, metric = _timed_move(agent, board, TIMEOUT_SEC)
+                        if math.isnan(time_sec):
+                            timed_out = True
                     rows.append({
                         "position_id": pos_id,
                         "algorithm": algorithm,
