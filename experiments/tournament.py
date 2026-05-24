@@ -21,9 +21,11 @@ from agents.mcts import MCTSAgent
 from agents.minimax import MinimaxAgent
 from agents.perceptron import (
     DEFAULT_MODEL_PATH,
+    PIXEL_MODEL_PATH,
     Perceptron,
     PerceptronAgent,
-    board_to_features,
+    move_features,
+    pixel_features,
 )
 from experiments.runner import play_one_game
 from game.board import O, X
@@ -38,7 +40,8 @@ PARAM_LABEL = {
     "minimax": "depth=3",
     "alphabeta": "depth=3",
     "mcts": "sims=1000",
-    "perceptron": "-",
+    "perceptron": "eng",        # инженерные признаки, без предохранителя
+    "perceptron_pixel": "pix",  # пиксельные признаки + предохранитель
 }
 
 
@@ -46,7 +49,7 @@ def _make_agent(
     algorithm: str,
     symbol: str,
     seed: int,
-    perceptron_model: Perceptron | None,
+    perceptron_models: dict[str, Perceptron],
 ) -> Agent:
     """Свежий агент. MCTS сидируется ``seed`` (различие между партиями)."""
     if algorithm == "minimax":
@@ -56,8 +59,17 @@ def _make_agent(
     if algorithm == "mcts":
         return MCTSAgent(symbol, simulations=1000, seed=seed)
     if algorithm == "perceptron":
-        assert perceptron_model is not None
-        return PerceptronAgent(symbol, perceptron_model, board_to_features)
+        # Инженерные признаки → защищается сама, предохранитель не нужен.
+        return PerceptronAgent(
+            symbol, perceptron_models["perceptron"], move_features,
+            tactical=False,
+        )
+    if algorithm == "perceptron_pixel":
+        # Пиксельные признаки → нужен тактический предохранитель.
+        return PerceptronAgent(
+            symbol, perceptron_models["perceptron_pixel"], pixel_features,
+            tactical=True,
+        )
     raise ValueError(algorithm)
 
 
@@ -105,14 +117,20 @@ def run(resume: bool = True) -> None:
     """
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
-    algorithms = ["minimax", "alphabeta", "mcts", "perceptron"]
-    perceptron_model: Perceptron | None = None
+    algorithms = ["minimax", "alphabeta", "mcts"]
+    perceptron_models: dict[str, Perceptron] = {}
     if os.path.exists(DEFAULT_MODEL_PATH):
-        perceptron_model = Perceptron.load_weights(DEFAULT_MODEL_PATH)
+        perceptron_models["perceptron"] = Perceptron.load_weights(DEFAULT_MODEL_PATH)
+        algorithms.append("perceptron")
     else:
         print(f"[tournament] {DEFAULT_MODEL_PATH} не найден — "
-              "пары с перцептроном пропускаются.")
-        algorithms.remove("perceptron")
+              "инженерный перцептрон пропускается.")
+    if os.path.exists(PIXEL_MODEL_PATH):
+        perceptron_models["perceptron_pixel"] = Perceptron.load_weights(PIXEL_MODEL_PATH)
+        algorithms.append("perceptron_pixel")
+    else:
+        print(f"[tournament] {PIXEL_MODEL_PATH} не найден — "
+              "пиксельный перцептрон пропускается.")
 
     completed = _completed_game_ids(TOURNAMENT_CSV) if resume else set()
     has_data = os.path.exists(TOURNAMENT_CSV) and os.path.getsize(TOURNAMENT_CSV) > 0
@@ -137,12 +155,12 @@ def run(resume: bool = True) -> None:
                         continue
                     if color_round == X:
                         first_color = X
-                        agent_x = _make_agent(algo_a, X, game_id, perceptron_model)
-                        agent_o = _make_agent(algo_b, O, game_id, perceptron_model)
+                        agent_x = _make_agent(algo_a, X, game_id, perceptron_models)
+                        agent_o = _make_agent(algo_b, O, game_id, perceptron_models)
                     else:
                         first_color = O
-                        agent_x = _make_agent(algo_b, X, game_id, perceptron_model)
-                        agent_o = _make_agent(algo_a, O, game_id, perceptron_model)
+                        agent_x = _make_agent(algo_b, X, game_id, perceptron_models)
+                        agent_o = _make_agent(algo_a, O, game_id, perceptron_models)
 
                     result = play_one_game(agent_x, agent_o, max_moves=MAX_MOVES)
                     t_f, t_s, avg_f, avg_s = _aggregate_times(

@@ -28,7 +28,8 @@ ALGO_LABEL = {
     "minimax": "Минимакс",
     "alphabeta": "Альфа-бета",
     "mcts": "MCTS",
-    "perceptron": "Перцептрон",
+    "perceptron": "Перц-инж",
+    "perceptron_pixel": "Перц-пикс",
 }
 
 
