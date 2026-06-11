@@ -24,7 +24,11 @@ matplotlib.use("Agg")  # headless
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from experiments.fig_strength_vs_cost import compute_strength_and_time  # noqa: E402
+from experiments.fig_strength_vs_cost import (  # noqa: E402
+    ANNOT_LABEL,
+    LABEL_OFFSET,
+    compute_strength_and_time,
+)
 
 RESULTS_DIR = "results"
 PERF_CSV = os.path.join(RESULTS_DIR, "perf.csv")
@@ -254,16 +258,20 @@ def bw_strength_vs_cost(rows: list[dict]) -> None:
         marker, filled = SCATTER_MARKERS.get(a, ("o", True))
         ax.scatter(times[a], scores[a], s=150, zorder=3, marker=marker,
                    facecolors="black" if filled else "white",
-                   edgecolors="black", linewidths=1.4,
-                   label=ALGO_LABEL.get(a, a))
+                   edgecolors="black", linewidths=1.4)
+        # Подписи у точек — те же смещения, что в цветной версии.
+        ax.annotate(
+            ANNOT_LABEL.get(a, ALGO_LABEL.get(a, a)), (times[a], scores[a]),
+            xytext=LABEL_OFFSET.get(a, (8, 8)),
+            textcoords="offset points", fontsize=11,
+            ha="center" if a in ANNOT_LABEL else "left",
+        )
     ax.set_xscale("log")
     ax.set_xlabel("Среднее время на ход, с (лог-шкала)")
     ax.set_ylabel("Доля очков в турнире (1 = победа, 0.5 = ничья)")
     ax.set_title("Сила игры vs стоимость хода (ч/б)")
     ax.set_ylim(-0.05, 1.05)
     ax.grid(True, which="both", alpha=0.3)
-    # Вместо подписей у точек — легенда (надёжнее в ч/б).
-    ax.legend(loc="center right", fontsize=10)
     fig.tight_layout()
     _save(fig, "bw_fig_strength_vs_cost.png")
 
