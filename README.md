@@ -199,6 +199,7 @@ python -m experiments.perf_benchmark        # Эксперимент A: скор
 python -m experiments.tournament            # Эксперимент B: сила игры
 python -m experiments.analyze               # графики и сводные таблицы
 python -m experiments.fig_strength_vs_cost  # Рис.7: сила vs стоимость хода
+python -m experiments.make_bw_figures       # ч/б версии всех графиков (bw_*.png)
 ```
 
 - **Эксперимент A** (`perf_benchmark.py`) — время хода и счётчик
